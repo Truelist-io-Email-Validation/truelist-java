@@ -185,10 +185,15 @@ public class Truelist {
                 handleErrorResponse(response, attempts, maxAttempts);
                 return response.body();
 
-            } catch (AuthenticationException | RateLimitException e) {
+            } catch (AuthenticationException e) {
                 throw e;
-            } catch (ApiException e) {
+            } catch (RateLimitException e) {
                 if (attempts >= maxAttempts) {
+                    throw e;
+                }
+                sleep(attempts);
+            } catch (ApiException e) {
+                if (!isRetryableStatus(e.getStatusCode()) || attempts >= maxAttempts) {
                     throw e;
                 }
                 sleep(attempts);
@@ -225,10 +230,15 @@ public class Truelist {
                 handleErrorResponse(response, attempts, maxAttempts);
                 return response.body();
 
-            } catch (AuthenticationException | RateLimitException e) {
+            } catch (AuthenticationException e) {
                 throw e;
-            } catch (ApiException e) {
+            } catch (RateLimitException e) {
                 if (attempts >= maxAttempts) {
+                    throw e;
+                }
+                sleep(attempts);
+            } catch (ApiException e) {
+                if (!isRetryableStatus(e.getStatusCode()) || attempts >= maxAttempts) {
                     throw e;
                 }
                 sleep(attempts);
@@ -268,6 +278,10 @@ public class Truelist {
 
         throw new ApiException(
                 "Unexpected response (HTTP " + status + "): " + response.body(), status);
+    }
+
+    private boolean isRetryableStatus(int statusCode) {
+        return statusCode >= 500;
     }
 
     private void sleep(int attempt) {
@@ -326,9 +340,9 @@ public class Truelist {
         }
 
         /**
-         * Sets the maximum number of retries for transient errors (5xx, network errors).
+         * Sets the maximum number of retries for transient errors (429, 5xx, network errors).
          *
-         * <p>Authentication errors (401) and rate limit errors (429) are never retried.</p>
+         * <p>Authentication errors (401) and other 4xx client errors are never retried.</p>
          *
          * @param maxRetries the max retries (default: 2)
          * @return this builder

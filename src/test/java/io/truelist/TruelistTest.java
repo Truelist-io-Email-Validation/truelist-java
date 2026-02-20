@@ -400,7 +400,7 @@ class TruelistTest {
     }
 
     @Test
-    void doesNotRetryRateLimitErrors() {
+    void retriesOnRateLimitError() {
         Truelist retryClient = Truelist.builder("key")
                 .baseUrl("http://localhost:" + wireMock.port())
                 .timeout(Duration.ofSeconds(5))
@@ -408,9 +408,52 @@ class TruelistTest {
                 .build();
 
         wireMock.stubFor(post(urlEqualTo("/api/v1/verify"))
+                .inScenario("rate-limit-retry")
+                .whenScenarioStateIs("Started")
+                .willReturn(aResponse().withStatus(429).withBody("Rate limited"))
+                .willSetStateTo("first-retry"));
+
+        wireMock.stubFor(post(urlEqualTo("/api/v1/verify"))
+                .inScenario("rate-limit-retry")
+                .whenScenarioStateIs("first-retry")
+                .willReturn(okJson("{\"state\":\"valid\",\"sub_state\":\"ok\"," +
+                        "\"free_email\":false,\"role\":false,\"disposable\":false}")));
+
+        ValidationResult result = retryClient.validate("user@example.com");
+
+        assertEquals("valid", result.getState());
+        wireMock.verify(2, postRequestedFor(urlEqualTo("/api/v1/verify")));
+    }
+
+    @Test
+    void exhaustsRetriesOnPersistentRateLimitError() {
+        Truelist retryClient = Truelist.builder("key")
+                .baseUrl("http://localhost:" + wireMock.port())
+                .timeout(Duration.ofSeconds(5))
+                .maxRetries(1)
+                .build();
+
+        wireMock.stubFor(post(urlEqualTo("/api/v1/verify"))
                 .willReturn(aResponse().withStatus(429).withBody("Rate limited")));
 
         assertThrows(RateLimitException.class, () ->
+                retryClient.validate("user@example.com"));
+
+        wireMock.verify(2, postRequestedFor(urlEqualTo("/api/v1/verify")));
+    }
+
+    @Test
+    void doesNotRetryClientErrors() {
+        Truelist retryClient = Truelist.builder("key")
+                .baseUrl("http://localhost:" + wireMock.port())
+                .timeout(Duration.ofSeconds(5))
+                .maxRetries(2)
+                .build();
+
+        wireMock.stubFor(post(urlEqualTo("/api/v1/verify"))
+                .willReturn(aResponse().withStatus(403).withBody("Forbidden")));
+
+        assertThrows(ApiException.class, () ->
                 retryClient.validate("user@example.com"));
 
         wireMock.verify(1, postRequestedFor(urlEqualTo("/api/v1/verify")));
