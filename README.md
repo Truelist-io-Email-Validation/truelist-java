@@ -2,7 +2,7 @@
 
 Official Java SDK for the [Truelist.io](https://truelist.io) email validation API.
 
-[![CI](https://github.com/truelist/truelist-java/actions/workflows/ci.yml/badge.svg)](https://github.com/truelist/truelist-java/actions/workflows/ci.yml)
+[![CI](https://github.com/Truelist-io-Email-Validation/truelist-java/actions/workflows/ci.yml/badge.svg)](https://github.com/Truelist-io-Email-Validation/truelist-java/actions/workflows/ci.yml)
 
 ## Requirements
 
