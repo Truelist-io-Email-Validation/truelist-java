@@ -1,7 +1,6 @@
 package io.truelist;
 
 import com.google.gson.Gson;
-import com.google.gson.JsonObject;
 import io.truelist.exceptions.ApiException;
 import io.truelist.exceptions.AuthenticationException;
 import io.truelist.exceptions.RateLimitException;
@@ -9,10 +8,13 @@ import io.truelist.exceptions.TruelistException;
 
 import java.io.IOException;
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.List;
 
 /**
  * Main client for the Truelist email validation API.
@@ -70,10 +72,7 @@ public class Truelist {
     }
 
     /**
-     * Validates an email address using server-side validation.
-     *
-     * <p>Uses the server API key for authentication. This endpoint is rate-limited
-     * to 10 requests per second.</p>
+     * Validates an email address.
      *
      * @param email the email address to validate
      * @return the validation result
@@ -88,56 +87,17 @@ public class Truelist {
             throw new IllegalArgumentException("Email must not be null or blank");
         }
 
-        JsonObject body = new JsonObject();
-        body.addProperty("email", email);
-
-        String responseBody = executeWithRetry(
-                "/api/v1/verify",
-                config.getApiKey(),
-                body.toString()
+        String encodedEmail = URLEncoder.encode(email, StandardCharsets.UTF_8);
+        String responseBody = executePostWithRetry(
+                "/api/v1/verify_inline?email=" + encodedEmail,
+                config.getApiKey()
         );
 
-        return gson.fromJson(responseBody, ValidationResult.class);
-    }
-
-    /**
-     * Validates an email address using frontend/form validation.
-     *
-     * <p>Uses the form API key for authentication. This endpoint is rate-limited
-     * to 60 requests per minute. A form API key must be configured via
-     * {@link Builder#formApiKey(String)}.</p>
-     *
-     * @param email the email address to validate
-     * @return the validation result
-     * @throws AuthenticationException  if the form API key is invalid (401)
-     * @throws RateLimitException       if the rate limit is exceeded (429)
-     * @throws ApiException             if the API returns an unexpected error
-     * @throws TruelistException        if a network or other error occurs
-     * @throws IllegalStateException    if no form API key is configured
-     * @throws IllegalArgumentException if email is null or blank
-     */
-    public ValidationResult formValidate(String email) {
-        if (email == null || email.trim().isEmpty()) {
-            throw new IllegalArgumentException("Email must not be null or blank");
+        VerifyResponse wrapper = gson.fromJson(responseBody, VerifyResponse.class);
+        if (wrapper.emails == null || wrapper.emails.isEmpty()) {
+            throw new ApiException("No results returned from API", 0);
         }
-
-        String formApiKey = config.getFormApiKey();
-        if (formApiKey == null || formApiKey.trim().isEmpty()) {
-            throw new IllegalStateException(
-                    "Form API key is required for form validation. " +
-                    "Configure it via Truelist.builder(apiKey).formApiKey(formKey).build()");
-        }
-
-        JsonObject body = new JsonObject();
-        body.addProperty("email", email);
-
-        String responseBody = executeWithRetry(
-                "/api/v1/form_verify",
-                formApiKey,
-                body.toString()
-        );
-
-        return gson.fromJson(responseBody, ValidationResult.class);
+        return wrapper.emails.get(0);
     }
 
     /**
@@ -150,7 +110,7 @@ public class Truelist {
      * @throws TruelistException       if a network or other error occurs
      */
     public AccountInfo getAccount() {
-        String responseBody = executeGetWithRetry("/api/v1/account", config.getApiKey());
+        String responseBody = executeGetWithRetry("/me", config.getApiKey());
         return gson.fromJson(responseBody, AccountInfo.class);
     }
 
@@ -163,7 +123,12 @@ public class Truelist {
         return config;
     }
 
-    private String executeWithRetry(String path, String token, String jsonBody) {
+    /** Wrapper for the verify response envelope. */
+    private static class VerifyResponse {
+        List<ValidationResult> emails;
+    }
+
+    private String executePostWithRetry(String path, String token) {
         int attempts = 0;
         int maxAttempts = config.getMaxRetries() + 1;
 
@@ -173,10 +138,9 @@ public class Truelist {
                 HttpRequest request = HttpRequest.newBuilder()
                         .uri(URI.create(config.getBaseUrl() + path))
                         .header("Authorization", "Bearer " + token)
-                        .header("Content-Type", "application/json")
                         .header("Accept", "application/json")
                         .timeout(config.getTimeout())
-                        .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
+                        .POST(HttpRequest.BodyPublishers.noBody())
                         .build();
 
                 HttpResponse<String> response = httpClient.send(request,
@@ -299,7 +263,6 @@ public class Truelist {
     public static class Builder {
 
         private final String apiKey;
-        private String formApiKey;
         private String baseUrl = DEFAULT_BASE_URL;
         private Duration timeout = DEFAULT_TIMEOUT;
         private int maxRetries = DEFAULT_MAX_RETRIES;
@@ -356,24 +319,13 @@ public class Truelist {
         }
 
         /**
-         * Sets the form API key for frontend validation via {@link Truelist#formValidate(String)}.
-         *
-         * @param formApiKey the form API key
-         * @return this builder
-         */
-        public Builder formApiKey(String formApiKey) {
-            this.formApiKey = formApiKey;
-            return this;
-        }
-
-        /**
          * Builds and returns a new {@link Truelist} client instance.
          *
          * @return the configured client
          */
         public Truelist build() {
             TruelistConfig config = new TruelistConfig(
-                    apiKey, formApiKey, baseUrl, timeout, maxRetries);
+                    apiKey, baseUrl, timeout, maxRetries);
             return new Truelist(config);
         }
     }

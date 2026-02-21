@@ -4,50 +4,125 @@ import com.google.gson.annotations.SerializedName;
 
 /**
  * Represents the result of an email validation request.
- *
- * <p>The result contains the validation state, sub-state, and various flags
- * indicating properties of the email address.</p>
  */
 public class ValidationResult {
 
+    @SerializedName("address")
+    private final String email;
+
+    private final String domain;
+
+    private final String canonical;
+
+    @SerializedName("mx_record")
+    private final String mxRecord;
+
+    @SerializedName("first_name")
+    private final String firstName;
+
+    @SerializedName("last_name")
+    private final String lastName;
+
+    @SerializedName("email_state")
     private final String state;
 
-    @SerializedName("sub_state")
+    @SerializedName("email_sub_state")
     private final String subState;
 
+    @SerializedName("verified_at")
+    private final String verifiedAt;
+
+    @SerializedName("did_you_mean")
     private final String suggestion;
-
-    @SerializedName("free_email")
-    private final boolean freeEmail;
-
-    private final boolean role;
-
-    private final boolean disposable;
 
     /**
      * Creates a new ValidationResult.
      *
-     * @param state      the validation state (valid, invalid, risky, unknown)
+     * @param email      the email address
+     * @param domain     the email domain
+     * @param canonical  the canonical local part
+     * @param mxRecord   the MX record, or null
+     * @param firstName  the first name, or null
+     * @param lastName   the last name, or null
+     * @param state      the validation state (ok, email_invalid, accept_all, unknown)
      * @param subState   the validation sub-state
+     * @param verifiedAt the verification timestamp
      * @param suggestion a suggested correction, or null
-     * @param freeEmail  whether the email is from a free provider
-     * @param role       whether the email is a role address
-     * @param disposable whether the email is a disposable address
      */
-    public ValidationResult(String state, String subState, String suggestion,
-                            boolean freeEmail, boolean role, boolean disposable) {
+    public ValidationResult(String email, String domain, String canonical,
+                            String mxRecord, String firstName, String lastName,
+                            String state, String subState, String verifiedAt,
+                            String suggestion) {
+        this.email = email;
+        this.domain = domain;
+        this.canonical = canonical;
+        this.mxRecord = mxRecord;
+        this.firstName = firstName;
+        this.lastName = lastName;
         this.state = state;
         this.subState = subState;
+        this.verifiedAt = verifiedAt;
         this.suggestion = suggestion;
-        this.freeEmail = freeEmail;
-        this.role = role;
-        this.disposable = disposable;
+    }
+
+    /**
+     * Returns the email address.
+     *
+     * @return the email address
+     */
+    public String getEmail() {
+        return email;
+    }
+
+    /**
+     * Returns the email domain.
+     *
+     * @return the domain
+     */
+    public String getDomain() {
+        return domain;
+    }
+
+    /**
+     * Returns the canonical local part of the email.
+     *
+     * @return the canonical part
+     */
+    public String getCanonical() {
+        return canonical;
+    }
+
+    /**
+     * Returns the MX record for the domain, or null.
+     *
+     * @return the MX record
+     */
+    public String getMxRecord() {
+        return mxRecord;
+    }
+
+    /**
+     * Returns the first name associated with the email, or null.
+     *
+     * @return the first name
+     */
+    public String getFirstName() {
+        return firstName;
+    }
+
+    /**
+     * Returns the last name associated with the email, or null.
+     *
+     * @return the last name
+     */
+    public String getLastName() {
+        return lastName;
     }
 
     /**
      * Returns the validation state.
      *
-     * @return one of "valid", "invalid", "risky", or "unknown"
+     * @return one of "ok", "email_invalid", "accept_all", or "unknown"
      */
     public String getState() {
         return state;
@@ -56,10 +131,19 @@ public class ValidationResult {
     /**
      * Returns the validation sub-state providing more detail about the result.
      *
-     * @return the sub-state (e.g., "ok", "disposable_address", "role_address")
+     * @return the sub-state (e.g., "email_ok", "is_disposable", "is_role")
      */
     public String getSubState() {
         return subState;
+    }
+
+    /**
+     * Returns the verification timestamp.
+     *
+     * @return the verified_at timestamp string
+     */
+    public String getVerifiedAt() {
+        return verifiedAt;
     }
 
     /**
@@ -74,41 +158,28 @@ public class ValidationResult {
     /**
      * Returns whether the email is valid.
      *
-     * @return true if the state is "valid"
+     * @return true if the state is "ok"
      */
     public boolean isValid() {
-        return "valid".equals(state);
-    }
-
-    /**
-     * Returns whether the email is valid, optionally treating risky emails as valid.
-     *
-     * @param allowRisky if true, both "valid" and "risky" states are considered valid
-     * @return true if the email passes validation
-     */
-    public boolean isValid(boolean allowRisky) {
-        if (allowRisky) {
-            return "valid".equals(state) || "risky".equals(state);
-        }
-        return "valid".equals(state);
+        return "ok".equals(state);
     }
 
     /**
      * Returns whether the email is invalid.
      *
-     * @return true if the state is "invalid"
+     * @return true if the state is "email_invalid"
      */
     public boolean isInvalid() {
-        return "invalid".equals(state);
+        return "email_invalid".equals(state);
     }
 
     /**
-     * Returns whether the email is risky.
+     * Returns whether the domain accepts all addresses.
      *
-     * @return true if the state is "risky"
+     * @return true if the state is "accept_all"
      */
-    public boolean isRisky() {
-        return "risky".equals(state);
+    public boolean isAcceptAll() {
+        return "accept_all".equals(state);
     }
 
     /**
@@ -121,41 +192,36 @@ public class ValidationResult {
     }
 
     /**
-     * Returns whether the email is from a free email provider.
+     * Returns whether the email is a disposable/temporary address.
      *
-     * @return true if the email is free
+     * @return true if the sub-state is "is_disposable"
      */
-    public boolean isFreeEmail() {
-        return freeEmail;
+    public boolean isDisposable() {
+        return "is_disposable".equals(subState);
     }
 
     /**
      * Returns whether the email is a role address (e.g., admin@, support@).
      *
-     * @return true if the email is a role address
+     * @return true if the sub-state is "is_role"
      */
     public boolean isRole() {
-        return role;
-    }
-
-    /**
-     * Returns whether the email is a disposable/temporary address.
-     *
-     * @return true if the email is disposable
-     */
-    public boolean isDisposable() {
-        return disposable;
+        return "is_role".equals(subState);
     }
 
     @Override
     public String toString() {
         return "ValidationResult{" +
-                "state='" + state + '\'' +
+                "email='" + email + '\'' +
+                ", domain='" + domain + '\'' +
+                ", canonical='" + canonical + '\'' +
+                ", mxRecord='" + mxRecord + '\'' +
+                ", firstName='" + firstName + '\'' +
+                ", lastName='" + lastName + '\'' +
+                ", state='" + state + '\'' +
                 ", subState='" + subState + '\'' +
+                ", verifiedAt='" + verifiedAt + '\'' +
                 ", suggestion='" + suggestion + '\'' +
-                ", freeEmail=" + freeEmail +
-                ", role=" + role +
-                ", disposable=" + disposable +
                 '}';
     }
 }

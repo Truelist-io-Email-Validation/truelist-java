@@ -10,15 +10,13 @@ import java.time.Duration;
 public class TruelistConfig {
 
     private final String apiKey;
-    private final String formApiKey;
     private final String baseUrl;
     private final Duration timeout;
     private final int maxRetries;
 
-    TruelistConfig(String apiKey, String formApiKey, String baseUrl,
+    TruelistConfig(String apiKey, String baseUrl,
                    Duration timeout, int maxRetries) {
         this.apiKey = apiKey;
-        this.formApiKey = formApiKey;
         this.baseUrl = baseUrl;
         this.timeout = timeout;
         this.maxRetries = maxRetries;
@@ -31,15 +29,6 @@ public class TruelistConfig {
      */
     public String getApiKey() {
         return apiKey;
-    }
-
-    /**
-     * Returns the form API key for frontend validation, or null if not set.
-     *
-     * @return the form API key
-     */
-    public String getFormApiKey() {
-        return formApiKey;
     }
 
     /**

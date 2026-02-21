@@ -5,7 +5,6 @@ import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 import io.truelist.exceptions.ApiException;
 import io.truelist.exceptions.AuthenticationException;
 import io.truelist.exceptions.RateLimitException;
-import io.truelist.exceptions.TruelistException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -19,6 +18,52 @@ class TruelistTest {
 
     private WireMockServer wireMock;
     private Truelist client;
+
+    private static final String VALID_RESPONSE = "{\"emails\":[{" +
+            "\"address\":\"user@example.com\"," +
+            "\"domain\":\"example.com\"," +
+            "\"canonical\":\"user\"," +
+            "\"mx_record\":null," +
+            "\"first_name\":null," +
+            "\"last_name\":null," +
+            "\"email_state\":\"ok\"," +
+            "\"email_sub_state\":\"email_ok\"," +
+            "\"verified_at\":\"2026-02-21T10:00:00.000Z\"," +
+            "\"did_you_mean\":null}]}";
+
+    private static final String INVALID_RESPONSE = "{\"emails\":[{" +
+            "\"address\":\"bad@example.com\"," +
+            "\"domain\":\"example.com\"," +
+            "\"canonical\":\"bad\"," +
+            "\"mx_record\":null," +
+            "\"first_name\":null," +
+            "\"last_name\":null," +
+            "\"email_state\":\"email_invalid\"," +
+            "\"email_sub_state\":\"failed_smtp_check\"," +
+            "\"verified_at\":\"2026-02-21T10:00:00.000Z\"," +
+            "\"did_you_mean\":null}]}";
+
+    private static final String DISPOSABLE_RESPONSE = "{\"emails\":[{" +
+            "\"address\":\"user@tempmail.com\"," +
+            "\"domain\":\"tempmail.com\"," +
+            "\"canonical\":\"user\"," +
+            "\"mx_record\":null," +
+            "\"first_name\":null," +
+            "\"last_name\":null," +
+            "\"email_state\":\"ok\"," +
+            "\"email_sub_state\":\"is_disposable\"," +
+            "\"verified_at\":\"2026-02-21T10:00:00.000Z\"," +
+            "\"did_you_mean\":null}]}";
+
+    private static final String ACCOUNT_RESPONSE = "{" +
+            "\"email\":\"team@company.com\"," +
+            "\"name\":\"Team Lead\"," +
+            "\"uuid\":\"a3828d19-1234-5678-9abc-def012345678\"," +
+            "\"time_zone\":\"America/New_York\"," +
+            "\"is_admin_role\":true," +
+            "\"token\":\"test_token\"," +
+            "\"api_keys\":[]," +
+            "\"account\":{\"name\":\"Company Inc\",\"payment_plan\":\"pro\",\"users\":[]}}";
 
     @BeforeEach
     void setUp() {
@@ -57,7 +102,6 @@ class TruelistTest {
         assertEquals("https://api.truelist.io", config.getBaseUrl());
         assertEquals(Duration.ofSeconds(30), config.getTimeout());
         assertEquals(2, config.getMaxRetries());
-        assertNull(config.getFormApiKey());
     }
 
     @Test
@@ -66,7 +110,6 @@ class TruelistTest {
                 .baseUrl("https://custom.api.com")
                 .timeout(Duration.ofSeconds(15))
                 .maxRetries(5)
-                .formApiKey("form-key")
                 .build();
 
         TruelistConfig config = customClient.getConfig();
@@ -74,7 +117,6 @@ class TruelistTest {
         assertEquals("https://custom.api.com", config.getBaseUrl());
         assertEquals(Duration.ofSeconds(15), config.getTimeout());
         assertEquals(5, config.getMaxRetries());
-        assertEquals("form-key", config.getFormApiKey());
     }
 
     @Test
@@ -95,104 +137,109 @@ class TruelistTest {
 
     @Test
     void validateReturnsValidResult() {
-        wireMock.stubFor(post(urlEqualTo("/api/v1/verify"))
+        wireMock.stubFor(post(urlPathEqualTo("/api/v1/verify_inline"))
+                .withQueryParam("email", equalTo("user@example.com"))
                 .withHeader("Authorization", equalTo("Bearer test-api-key"))
-                .withHeader("Content-Type", equalTo("application/json"))
-                .willReturn(okJson("{" +
-                        "\"state\":\"valid\"," +
-                        "\"sub_state\":\"ok\"," +
-                        "\"suggestion\":null," +
-                        "\"free_email\":true," +
-                        "\"role\":false," +
-                        "\"disposable\":false" +
-                        "}")));
+                .willReturn(okJson(VALID_RESPONSE)));
 
-        ValidationResult result = client.validate("user@gmail.com");
+        ValidationResult result = client.validate("user@example.com");
 
-        assertEquals("valid", result.getState());
-        assertEquals("ok", result.getSubState());
+        assertEquals("user@example.com", result.getEmail());
+        assertEquals("example.com", result.getDomain());
+        assertEquals("user", result.getCanonical());
+        assertEquals("ok", result.getState());
+        assertEquals("email_ok", result.getSubState());
         assertNull(result.getSuggestion());
         assertTrue(result.isValid());
         assertFalse(result.isInvalid());
-        assertFalse(result.isRisky());
+        assertFalse(result.isAcceptAll());
         assertFalse(result.isUnknown());
-        assertTrue(result.isFreeEmail());
-        assertFalse(result.isRole());
-        assertFalse(result.isDisposable());
     }
 
     @Test
     void validateReturnsInvalidResult() {
-        wireMock.stubFor(post(urlEqualTo("/api/v1/verify"))
-                .willReturn(okJson("{" +
-                        "\"state\":\"invalid\"," +
-                        "\"sub_state\":\"failed_no_mailbox\"," +
-                        "\"suggestion\":null," +
-                        "\"free_email\":false," +
-                        "\"role\":false," +
-                        "\"disposable\":false" +
-                        "}")));
+        wireMock.stubFor(post(urlPathEqualTo("/api/v1/verify_inline"))
+                .willReturn(okJson(INVALID_RESPONSE)));
 
         ValidationResult result = client.validate("bad@example.com");
 
-        assertEquals("invalid", result.getState());
-        assertEquals("failed_no_mailbox", result.getSubState());
+        assertEquals("email_invalid", result.getState());
+        assertEquals("failed_smtp_check", result.getSubState());
         assertTrue(result.isInvalid());
         assertFalse(result.isValid());
     }
 
     @Test
-    void validateReturnsRiskyResult() {
-        wireMock.stubFor(post(urlEqualTo("/api/v1/verify"))
-                .willReturn(okJson("{" +
-                        "\"state\":\"risky\"," +
-                        "\"sub_state\":\"disposable_address\"," +
-                        "\"suggestion\":null," +
-                        "\"free_email\":false," +
-                        "\"role\":false," +
-                        "\"disposable\":true" +
-                        "}")));
+    void validateReturnsDisposableResult() {
+        wireMock.stubFor(post(urlPathEqualTo("/api/v1/verify_inline"))
+                .willReturn(okJson(DISPOSABLE_RESPONSE)));
 
         ValidationResult result = client.validate("user@tempmail.com");
 
-        assertEquals("risky", result.getState());
-        assertTrue(result.isRisky());
+        assertEquals("ok", result.getState());
+        assertEquals("is_disposable", result.getSubState());
         assertTrue(result.isDisposable());
+        assertFalse(result.isRole());
+    }
+
+    @Test
+    void validateReturnsAcceptAllResult() {
+        String acceptAllResponse = "{\"emails\":[{" +
+                "\"address\":\"user@catchall.com\"," +
+                "\"domain\":\"catchall.com\"," +
+                "\"canonical\":\"user\"," +
+                "\"mx_record\":null," +
+                "\"first_name\":null," +
+                "\"last_name\":null," +
+                "\"email_state\":\"accept_all\"," +
+                "\"email_sub_state\":\"email_ok\"," +
+                "\"verified_at\":\"2026-02-21T10:00:00.000Z\"," +
+                "\"did_you_mean\":null}]}";
+
+        wireMock.stubFor(post(urlPathEqualTo("/api/v1/verify_inline"))
+                .willReturn(okJson(acceptAllResponse)));
+
+        ValidationResult result = client.validate("user@catchall.com");
+
+        assertEquals("accept_all", result.getState());
+        assertTrue(result.isAcceptAll());
         assertFalse(result.isValid());
-        assertTrue(result.isValid(true));
     }
 
     @Test
     void validateReturnsUnknownResult() {
-        wireMock.stubFor(post(urlEqualTo("/api/v1/verify"))
-                .willReturn(okJson("{" +
-                        "\"state\":\"unknown\"," +
-                        "\"sub_state\":\"unknown\"," +
-                        "\"suggestion\":null," +
-                        "\"free_email\":false," +
-                        "\"role\":false," +
-                        "\"disposable\":false" +
-                        "}")));
+        String unknownResponse = "{\"emails\":[{" +
+                "\"address\":\"user@mystery.com\"," +
+                "\"domain\":\"mystery.com\"," +
+                "\"canonical\":\"user\"," +
+                "\"mx_record\":null," +
+                "\"first_name\":null," +
+                "\"last_name\":null," +
+                "\"email_state\":\"unknown\"," +
+                "\"email_sub_state\":\"unknown_error\"," +
+                "\"verified_at\":\"2026-02-21T10:00:00.000Z\"," +
+                "\"did_you_mean\":null}]}";
+
+        wireMock.stubFor(post(urlPathEqualTo("/api/v1/verify_inline"))
+                .willReturn(okJson(unknownResponse)));
 
         ValidationResult result = client.validate("user@mystery.com");
 
         assertEquals("unknown", result.getState());
         assertTrue(result.isUnknown());
         assertFalse(result.isValid());
-        assertFalse(result.isValid(true));
     }
 
     @Test
-    void validateSendsCorrectRequestBody() {
-        wireMock.stubFor(post(urlEqualTo("/api/v1/verify"))
-                .withRequestBody(equalToJson("{\"email\":\"test@example.com\"}"))
-                .willReturn(okJson("{\"state\":\"valid\",\"sub_state\":\"ok\"," +
-                        "\"free_email\":false,\"role\":false,\"disposable\":false}")));
+    void validateSendsEmailAsQueryParam() {
+        wireMock.stubFor(post(urlPathEqualTo("/api/v1/verify_inline"))
+                .withQueryParam("email", equalTo("test@example.com"))
+                .willReturn(okJson(VALID_RESPONSE)));
 
         client.validate("test@example.com");
 
-        wireMock.verify(postRequestedFor(urlEqualTo("/api/v1/verify"))
-                .withRequestBody(equalToJson("{\"email\":\"test@example.com\"}")));
+        wireMock.verify(postRequestedFor(urlPathEqualTo("/api/v1/verify_inline"))
+                .withQueryParam("email", equalTo("test@example.com")));
     }
 
     @Test
@@ -207,83 +254,52 @@ class TruelistTest {
 
     @Test
     void validateReturnsSuggestion() {
-        wireMock.stubFor(post(urlEqualTo("/api/v1/verify"))
-                .willReturn(okJson("{" +
-                        "\"state\":\"invalid\"," +
-                        "\"sub_state\":\"failed_syntax_check\"," +
-                        "\"suggestion\":\"user@gmail.com\"," +
-                        "\"free_email\":false," +
-                        "\"role\":false," +
-                        "\"disposable\":false" +
-                        "}")));
+        String suggestionResponse = "{\"emails\":[{" +
+                "\"address\":\"user@gmial.com\"," +
+                "\"domain\":\"gmial.com\"," +
+                "\"canonical\":\"user\"," +
+                "\"mx_record\":null," +
+                "\"first_name\":null," +
+                "\"last_name\":null," +
+                "\"email_state\":\"email_invalid\"," +
+                "\"email_sub_state\":\"unknown_error\"," +
+                "\"verified_at\":\"2026-02-21T10:00:00.000Z\"," +
+                "\"did_you_mean\":\"user@gmail.com\"}]}";
+
+        wireMock.stubFor(post(urlPathEqualTo("/api/v1/verify_inline"))
+                .willReturn(okJson(suggestionResponse)));
 
         ValidationResult result = client.validate("user@gmial.com");
 
         assertEquals("user@gmail.com", result.getSuggestion());
     }
 
-    // --- formValidate() Tests ---
-
-    @Test
-    void formValidateUsesFormApiKey() {
-        Truelist formClient = Truelist.builder("server-key")
-                .baseUrl("http://localhost:" + wireMock.port())
-                .timeout(Duration.ofSeconds(5))
-                .maxRetries(0)
-                .formApiKey("form-api-key")
-                .build();
-
-        wireMock.stubFor(post(urlEqualTo("/api/v1/form_verify"))
-                .withHeader("Authorization", equalTo("Bearer form-api-key"))
-                .willReturn(okJson("{\"state\":\"valid\",\"sub_state\":\"ok\"," +
-                        "\"free_email\":false,\"role\":false,\"disposable\":false}")));
-
-        ValidationResult result = formClient.formValidate("user@example.com");
-
-        assertEquals("valid", result.getState());
-        wireMock.verify(postRequestedFor(urlEqualTo("/api/v1/form_verify"))
-                .withHeader("Authorization", equalTo("Bearer form-api-key")));
-    }
-
-    @Test
-    void formValidateThrowsWithoutFormApiKey() {
-        assertThrows(IllegalStateException.class, () ->
-                client.formValidate("user@example.com"));
-    }
-
-    @Test
-    void formValidateRejectsNullEmail() {
-        Truelist formClient = Truelist.builder("key")
-                .formApiKey("form-key")
-                .build();
-        assertThrows(IllegalArgumentException.class, () ->
-                formClient.formValidate(null));
-    }
-
     // --- getAccount() Tests ---
 
     @Test
     void getAccountReturnsAccountInfo() {
-        wireMock.stubFor(get(urlEqualTo("/api/v1/account"))
+        wireMock.stubFor(get(urlEqualTo("/me"))
                 .withHeader("Authorization", equalTo("Bearer test-api-key"))
-                .willReturn(okJson("{" +
-                        "\"email\":\"user@company.com\"," +
-                        "\"plan\":\"pro\"," +
-                        "\"credits\":9542" +
-                        "}")));
+                .willReturn(okJson(ACCOUNT_RESPONSE)));
 
         AccountInfo account = client.getAccount();
 
-        assertEquals("user@company.com", account.getEmail());
+        assertEquals("team@company.com", account.getEmail());
+        assertEquals("Team Lead", account.getName());
+        assertEquals("a3828d19-1234-5678-9abc-def012345678", account.getUuid());
+        assertEquals("America/New_York", account.getTimeZone());
+        assertTrue(account.isAdminRole());
+        assertNotNull(account.getAccount());
+        assertEquals("Company Inc", account.getAccount().getName());
+        assertEquals("pro", account.getAccount().getPaymentPlan());
         assertEquals("pro", account.getPlan());
-        assertEquals(9542, account.getCredits());
     }
 
     // --- Error Handling Tests ---
 
     @Test
     void authErrorAlwaysThrowsOnValidate() {
-        wireMock.stubFor(post(urlEqualTo("/api/v1/verify"))
+        wireMock.stubFor(post(urlPathEqualTo("/api/v1/verify_inline"))
                 .willReturn(unauthorized().withBody("Unauthorized")));
 
         AuthenticationException ex = assertThrows(AuthenticationException.class, () ->
@@ -294,30 +310,15 @@ class TruelistTest {
 
     @Test
     void authErrorAlwaysThrowsOnGetAccount() {
-        wireMock.stubFor(get(urlEqualTo("/api/v1/account"))
+        wireMock.stubFor(get(urlEqualTo("/me"))
                 .willReturn(unauthorized().withBody("Unauthorized")));
 
         assertThrows(AuthenticationException.class, () -> client.getAccount());
     }
 
     @Test
-    void authErrorAlwaysThrowsOnFormValidate() {
-        Truelist formClient = Truelist.builder("key")
-                .baseUrl("http://localhost:" + wireMock.port())
-                .maxRetries(0)
-                .formApiKey("bad-form-key")
-                .build();
-
-        wireMock.stubFor(post(urlEqualTo("/api/v1/form_verify"))
-                .willReturn(unauthorized().withBody("Unauthorized")));
-
-        assertThrows(AuthenticationException.class, () ->
-                formClient.formValidate("user@example.com"));
-    }
-
-    @Test
     void rateLimitThrows429Exception() {
-        wireMock.stubFor(post(urlEqualTo("/api/v1/verify"))
+        wireMock.stubFor(post(urlPathEqualTo("/api/v1/verify_inline"))
                 .willReturn(aResponse().withStatus(429).withBody("Too Many Requests")));
 
         RateLimitException ex = assertThrows(RateLimitException.class, () ->
@@ -328,7 +329,7 @@ class TruelistTest {
 
     @Test
     void serverErrorThrowsApiException() {
-        wireMock.stubFor(post(urlEqualTo("/api/v1/verify"))
+        wireMock.stubFor(post(urlPathEqualTo("/api/v1/verify_inline"))
                 .willReturn(serverError().withBody("Internal Server Error")));
 
         ApiException ex = assertThrows(ApiException.class, () ->
@@ -339,7 +340,7 @@ class TruelistTest {
 
     @Test
     void unexpectedStatusThrowsApiException() {
-        wireMock.stubFor(post(urlEqualTo("/api/v1/verify"))
+        wireMock.stubFor(post(urlPathEqualTo("/api/v1/verify_inline"))
                 .willReturn(aResponse().withStatus(403).withBody("Forbidden")));
 
         ApiException ex = assertThrows(ApiException.class, () ->
@@ -358,28 +359,27 @@ class TruelistTest {
                 .maxRetries(2)
                 .build();
 
-        wireMock.stubFor(post(urlEqualTo("/api/v1/verify"))
+        wireMock.stubFor(post(urlPathEqualTo("/api/v1/verify_inline"))
                 .inScenario("retry")
                 .whenScenarioStateIs("Started")
                 .willReturn(serverError().withBody("Error"))
                 .willSetStateTo("first-retry"));
 
-        wireMock.stubFor(post(urlEqualTo("/api/v1/verify"))
+        wireMock.stubFor(post(urlPathEqualTo("/api/v1/verify_inline"))
                 .inScenario("retry")
                 .whenScenarioStateIs("first-retry")
                 .willReturn(serverError().withBody("Error"))
                 .willSetStateTo("second-retry"));
 
-        wireMock.stubFor(post(urlEqualTo("/api/v1/verify"))
+        wireMock.stubFor(post(urlPathEqualTo("/api/v1/verify_inline"))
                 .inScenario("retry")
                 .whenScenarioStateIs("second-retry")
-                .willReturn(okJson("{\"state\":\"valid\",\"sub_state\":\"ok\"," +
-                        "\"free_email\":false,\"role\":false,\"disposable\":false}")));
+                .willReturn(okJson(VALID_RESPONSE)));
 
         ValidationResult result = retryClient.validate("user@example.com");
 
-        assertEquals("valid", result.getState());
-        wireMock.verify(3, postRequestedFor(urlEqualTo("/api/v1/verify")));
+        assertEquals("ok", result.getState());
+        wireMock.verify(3, postRequestedFor(urlPathEqualTo("/api/v1/verify_inline")));
     }
 
     @Test
@@ -390,13 +390,13 @@ class TruelistTest {
                 .maxRetries(2)
                 .build();
 
-        wireMock.stubFor(post(urlEqualTo("/api/v1/verify"))
+        wireMock.stubFor(post(urlPathEqualTo("/api/v1/verify_inline"))
                 .willReturn(unauthorized().withBody("Unauthorized")));
 
         assertThrows(AuthenticationException.class, () ->
                 retryClient.validate("user@example.com"));
 
-        wireMock.verify(1, postRequestedFor(urlEqualTo("/api/v1/verify")));
+        wireMock.verify(1, postRequestedFor(urlPathEqualTo("/api/v1/verify_inline")));
     }
 
     @Test
@@ -407,22 +407,21 @@ class TruelistTest {
                 .maxRetries(2)
                 .build();
 
-        wireMock.stubFor(post(urlEqualTo("/api/v1/verify"))
+        wireMock.stubFor(post(urlPathEqualTo("/api/v1/verify_inline"))
                 .inScenario("rate-limit-retry")
                 .whenScenarioStateIs("Started")
                 .willReturn(aResponse().withStatus(429).withBody("Rate limited"))
                 .willSetStateTo("first-retry"));
 
-        wireMock.stubFor(post(urlEqualTo("/api/v1/verify"))
+        wireMock.stubFor(post(urlPathEqualTo("/api/v1/verify_inline"))
                 .inScenario("rate-limit-retry")
                 .whenScenarioStateIs("first-retry")
-                .willReturn(okJson("{\"state\":\"valid\",\"sub_state\":\"ok\"," +
-                        "\"free_email\":false,\"role\":false,\"disposable\":false}")));
+                .willReturn(okJson(VALID_RESPONSE)));
 
         ValidationResult result = retryClient.validate("user@example.com");
 
-        assertEquals("valid", result.getState());
-        wireMock.verify(2, postRequestedFor(urlEqualTo("/api/v1/verify")));
+        assertEquals("ok", result.getState());
+        wireMock.verify(2, postRequestedFor(urlPathEqualTo("/api/v1/verify_inline")));
     }
 
     @Test
@@ -433,13 +432,13 @@ class TruelistTest {
                 .maxRetries(1)
                 .build();
 
-        wireMock.stubFor(post(urlEqualTo("/api/v1/verify"))
+        wireMock.stubFor(post(urlPathEqualTo("/api/v1/verify_inline"))
                 .willReturn(aResponse().withStatus(429).withBody("Rate limited")));
 
         assertThrows(RateLimitException.class, () ->
                 retryClient.validate("user@example.com"));
 
-        wireMock.verify(2, postRequestedFor(urlEqualTo("/api/v1/verify")));
+        wireMock.verify(2, postRequestedFor(urlPathEqualTo("/api/v1/verify_inline")));
     }
 
     @Test
@@ -450,13 +449,13 @@ class TruelistTest {
                 .maxRetries(2)
                 .build();
 
-        wireMock.stubFor(post(urlEqualTo("/api/v1/verify"))
+        wireMock.stubFor(post(urlPathEqualTo("/api/v1/verify_inline"))
                 .willReturn(aResponse().withStatus(403).withBody("Forbidden")));
 
         assertThrows(ApiException.class, () ->
                 retryClient.validate("user@example.com"));
 
-        wireMock.verify(1, postRequestedFor(urlEqualTo("/api/v1/verify")));
+        wireMock.verify(1, postRequestedFor(urlPathEqualTo("/api/v1/verify_inline")));
     }
 
     @Test
@@ -467,22 +466,22 @@ class TruelistTest {
                 .maxRetries(1)
                 .build();
 
-        wireMock.stubFor(post(urlEqualTo("/api/v1/verify"))
+        wireMock.stubFor(post(urlPathEqualTo("/api/v1/verify_inline"))
                 .willReturn(serverError().withBody("Error")));
 
         assertThrows(ApiException.class, () ->
                 retryClient.validate("user@example.com"));
 
-        wireMock.verify(2, postRequestedFor(urlEqualTo("/api/v1/verify")));
+        wireMock.verify(2, postRequestedFor(urlPathEqualTo("/api/v1/verify_inline")));
     }
 
     @Test
     void zeroRetriesMeansOneAttempt() {
-        wireMock.stubFor(post(urlEqualTo("/api/v1/verify"))
+        wireMock.stubFor(post(urlPathEqualTo("/api/v1/verify_inline"))
                 .willReturn(serverError().withBody("Error")));
 
         assertThrows(ApiException.class, () -> client.validate("user@example.com"));
 
-        wireMock.verify(1, postRequestedFor(urlEqualTo("/api/v1/verify")));
+        wireMock.verify(1, postRequestedFor(urlPathEqualTo("/api/v1/verify_inline")));
     }
 }
