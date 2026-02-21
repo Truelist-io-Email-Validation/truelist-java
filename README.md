@@ -64,42 +64,32 @@ Truelist client = Truelist.builder("your-api-key")
     .baseUrl("https://api.truelist.io")   // default
     .timeout(Duration.ofSeconds(10))       // default: 30s
     .maxRetries(2)                         // default: 2
-    .formApiKey("your-form-key")           // optional, for formValidate()
     .build();
 ```
 
 The client is thread-safe and should be reused across your application.
 
-### Validate an Email (Server-side)
-
-Use `validate()` with your server API key for backend validation. Rate limit: 10 requests/second.
+### Validate an Email
 
 ```java
 ValidationResult result = client.validate("user@example.com");
 
-result.getState();      // "valid", "invalid", "risky", or "unknown"
-result.getSubState();   // "ok", "disposable_address", "role_address", etc.
+result.getEmail();      // "user@example.com"
+result.getDomain();     // "example.com"
+result.getCanonical();  // "user"
+result.getState();      // "ok", "email_invalid", "accept_all", or "unknown"
+result.getSubState();   // "email_ok", "is_disposable", "is_role", etc.
 result.getSuggestion(); // suggested correction, or null
-result.isValid();       // true if state is "valid"
-result.isValid(true);   // true if state is "valid" or "risky"
-result.isInvalid();     // true if state is "invalid"
-result.isRisky();       // true if state is "risky"
+result.getMxRecord();   // MX record for the domain, or null
+result.getFirstName();  // first name, or null
+result.getLastName();   // last name, or null
+result.getVerifiedAt(); // verification timestamp
+result.isValid();       // true if state is "ok"
+result.isInvalid();     // true if state is "email_invalid"
+result.isAcceptAll();   // true if state is "accept_all"
 result.isUnknown();     // true if state is "unknown"
-result.isFreeEmail();   // true if free email provider (Gmail, Yahoo, etc.)
-result.isRole();        // true if role address (admin@, support@, etc.)
-result.isDisposable();  // true if disposable/temporary address
-```
-
-### Validate an Email (Frontend/Form)
-
-Use `formValidate()` with your form API key for frontend validation. Rate limit: 60 requests/minute.
-
-```java
-Truelist client = Truelist.builder("your-server-key")
-    .formApiKey("your-form-key")
-    .build();
-
-ValidationResult result = client.formValidate("user@example.com");
+result.isDisposable();  // true if sub-state is "is_disposable"
+result.isRole();        // true if sub-state is "is_role"
 ```
 
 ### Get Account Info
@@ -109,34 +99,34 @@ import io.truelist.AccountInfo;
 
 AccountInfo account = client.getAccount();
 
-account.getEmail();   // "you@company.com"
-account.getPlan();    // "pro"
-account.getCredits(); // 9542
+account.getEmail();                    // "you@company.com"
+account.getName();                     // "Your Name"
+account.getUuid();                     // "a3828d19-..."
+account.getTimeZone();                 // "America/New_York"
+account.isAdminRole();                 // true/false
+account.getPlan();                     // "pro" (shortcut)
+account.getAccount().getName();        // "Company Inc"
+account.getAccount().getPaymentPlan(); // "pro"
 ```
 
 ## Response States
 
-| State     | Description                          |
-|-----------|--------------------------------------|
-| `valid`   | Email address is valid               |
-| `invalid` | Email address is invalid             |
-| `risky`   | Email exists but may have issues     |
-| `unknown` | Could not determine validity         |
+| State           | Description                          |
+|-----------------|--------------------------------------|
+| `ok`            | Email address is valid               |
+| `email_invalid` | Email address is invalid             |
+| `accept_all`    | Domain accepts all addresses         |
+| `unknown`       | Could not determine validity         |
 
 ### Sub-states
 
-| Sub-state              | Description                        |
-|------------------------|------------------------------------|
-| `ok`                   | Valid, no issues                   |
-| `accept_all`           | Domain accepts all addresses       |
-| `disposable_address`   | Disposable/temporary email         |
-| `role_address`         | Role-based address (admin@, etc.)  |
-| `failed_mx_check`      | Domain has no MX records           |
-| `failed_spam_trap`     | Known spam trap address            |
-| `failed_no_mailbox`    | Mailbox does not exist             |
-| `failed_greylisted`    | Server temporarily rejected        |
-| `failed_syntax_check`  | Invalid email syntax               |
-| `unknown`              | Could not determine                |
+| Sub-state           | Description                        |
+|---------------------|------------------------------------|
+| `email_ok`          | Valid, no issues                   |
+| `is_disposable`     | Disposable/temporary email         |
+| `is_role`           | Role-based address (admin@, etc.)  |
+| `failed_smtp_check` | SMTP check failed                  |
+| `unknown_error`     | Could not determine                |
 
 ## Error Handling
 
@@ -149,23 +139,23 @@ try {
     // Invalid API key (HTTP 401) - always thrown, never retried
     System.err.println("Bad API key: " + e.getMessage());
 } catch (RateLimitException e) {
-    // Too many requests (HTTP 429) - never retried
+    // Too many requests (HTTP 429)
     System.err.println("Slow down: " + e.getMessage());
 } catch (ApiException e) {
-    // Server error (5xx) or unexpected status - retried per maxRetries config
+    // Server error (5xx) or unexpected status
     System.err.println("API error (" + e.getStatusCode() + "): " + e.getMessage());
 } catch (TruelistException e) {
-    // Network error or other failure - retried per maxRetries config
+    // Network error or other failure
     System.err.println("Request failed: " + e.getMessage());
 }
 ```
 
 ### Retry Behavior
 
-The client automatically retries on transient errors (5xx server errors, network failures) with exponential backoff. Configure with `maxRetries()`:
+The client automatically retries on transient errors with exponential backoff. Configure with `maxRetries()`:
 
 - **Authentication errors (401)**: Never retried, always thrown immediately
-- **Rate limit errors (429)**: Never retried, always thrown immediately
+- **Rate limit errors (429)**: Retried up to `maxRetries` times
 - **Server errors (5xx)**: Retried up to `maxRetries` times
 - **Network errors**: Retried up to `maxRetries` times
 

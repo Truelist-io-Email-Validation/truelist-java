@@ -9,122 +9,123 @@ class ValidationResultTest {
     @Test
     void validEmailPredicates() {
         ValidationResult result = new ValidationResult(
-                "valid", "ok", null, true, false, false);
+                "user@example.com", "example.com", "user",
+                null, null, null,
+                "ok", "email_ok", "2026-02-21T10:00:00.000Z", null);
 
         assertTrue(result.isValid());
-        assertTrue(result.isValid(false));
-        assertTrue(result.isValid(true));
         assertFalse(result.isInvalid());
-        assertFalse(result.isRisky());
+        assertFalse(result.isAcceptAll());
         assertFalse(result.isUnknown());
     }
 
     @Test
     void invalidEmailPredicates() {
         ValidationResult result = new ValidationResult(
-                "invalid", "failed_no_mailbox", null, false, false, false);
+                "bad@example.com", "example.com", "bad",
+                null, null, null,
+                "email_invalid", "failed_smtp_check", "2026-02-21T10:00:00.000Z", null);
 
         assertFalse(result.isValid());
-        assertFalse(result.isValid(true));
         assertTrue(result.isInvalid());
-        assertFalse(result.isRisky());
+        assertFalse(result.isAcceptAll());
         assertFalse(result.isUnknown());
     }
 
     @Test
-    void riskyEmailPredicates() {
+    void acceptAllPredicates() {
         ValidationResult result = new ValidationResult(
-                "risky", "disposable_address", null, false, false, true);
+                "user@catchall.com", "catchall.com", "user",
+                null, null, null,
+                "accept_all", "email_ok", "2026-02-21T10:00:00.000Z", null);
 
         assertFalse(result.isValid());
-        assertFalse(result.isValid(false));
-        assertTrue(result.isValid(true));
         assertFalse(result.isInvalid());
-        assertTrue(result.isRisky());
+        assertTrue(result.isAcceptAll());
         assertFalse(result.isUnknown());
-        assertTrue(result.isDisposable());
     }
 
     @Test
     void unknownEmailPredicates() {
         ValidationResult result = new ValidationResult(
-                "unknown", "unknown", null, false, false, false);
+                "user@mystery.com", "mystery.com", "user",
+                null, null, null,
+                "unknown", "unknown_error", "2026-02-21T10:00:00.000Z", null);
 
         assertFalse(result.isValid());
-        assertFalse(result.isValid(true));
         assertFalse(result.isInvalid());
-        assertFalse(result.isRisky());
+        assertFalse(result.isAcceptAll());
         assertTrue(result.isUnknown());
     }
 
     @Test
-    void freeEmailFlag() {
+    void disposableSubState() {
         ValidationResult result = new ValidationResult(
-                "valid", "ok", null, true, false, false);
-        assertTrue(result.isFreeEmail());
+                "user@tempmail.com", "tempmail.com", "user",
+                null, null, null,
+                "ok", "is_disposable", "2026-02-21T10:00:00.000Z", null);
 
-        ValidationResult nonFree = new ValidationResult(
-                "valid", "ok", null, false, false, false);
-        assertFalse(nonFree.isFreeEmail());
-    }
-
-    @Test
-    void roleFlag() {
-        ValidationResult result = new ValidationResult(
-                "risky", "role_address", null, false, true, false);
-        assertTrue(result.isRole());
-
-        ValidationResult nonRole = new ValidationResult(
-                "valid", "ok", null, false, false, false);
-        assertFalse(nonRole.isRole());
-    }
-
-    @Test
-    void disposableFlag() {
-        ValidationResult result = new ValidationResult(
-                "risky", "disposable_address", null, false, false, true);
         assertTrue(result.isDisposable());
+        assertFalse(result.isRole());
+    }
 
-        ValidationResult nonDisposable = new ValidationResult(
-                "valid", "ok", null, false, false, false);
-        assertFalse(nonDisposable.isDisposable());
+    @Test
+    void roleSubState() {
+        ValidationResult result = new ValidationResult(
+                "admin@company.com", "company.com", "admin",
+                null, null, null,
+                "ok", "is_role", "2026-02-21T10:00:00.000Z", null);
+
+        assertTrue(result.isRole());
+        assertFalse(result.isDisposable());
     }
 
     @Test
     void suggestion() {
         ValidationResult withSuggestion = new ValidationResult(
-                "invalid", "failed_syntax_check", "user@gmail.com",
-                false, false, false);
+                "user@gmial.com", "gmial.com", "user",
+                null, null, null,
+                "email_invalid", "unknown_error", "2026-02-21T10:00:00.000Z",
+                "user@gmail.com");
         assertEquals("user@gmail.com", withSuggestion.getSuggestion());
 
         ValidationResult withoutSuggestion = new ValidationResult(
-                "valid", "ok", null, false, false, false);
+                "user@example.com", "example.com", "user",
+                null, null, null,
+                "ok", "email_ok", "2026-02-21T10:00:00.000Z", null);
         assertNull(withoutSuggestion.getSuggestion());
     }
 
     @Test
     void gettersReturnCorrectValues() {
         ValidationResult result = new ValidationResult(
-                "valid", "ok", "suggestion@test.com", true, true, true);
+                "user@example.com", "example.com", "user",
+                "mx.example.com", "John", "Doe",
+                "ok", "email_ok", "2026-02-21T10:00:00.000Z", null);
 
-        assertEquals("valid", result.getState());
-        assertEquals("ok", result.getSubState());
-        assertEquals("suggestion@test.com", result.getSuggestion());
-        assertTrue(result.isFreeEmail());
-        assertTrue(result.isRole());
-        assertTrue(result.isDisposable());
+        assertEquals("user@example.com", result.getEmail());
+        assertEquals("example.com", result.getDomain());
+        assertEquals("user", result.getCanonical());
+        assertEquals("mx.example.com", result.getMxRecord());
+        assertEquals("John", result.getFirstName());
+        assertEquals("Doe", result.getLastName());
+        assertEquals("ok", result.getState());
+        assertEquals("email_ok", result.getSubState());
+        assertEquals("2026-02-21T10:00:00.000Z", result.getVerifiedAt());
+        assertNull(result.getSuggestion());
     }
 
     @Test
     void toStringContainsAllFields() {
         ValidationResult result = new ValidationResult(
-                "valid", "ok", null, true, false, false);
+                "user@example.com", "example.com", "user",
+                null, null, null,
+                "ok", "email_ok", "2026-02-21T10:00:00.000Z", null);
 
         String str = result.toString();
-        assertTrue(str.contains("valid"));
+        assertTrue(str.contains("user@example.com"));
+        assertTrue(str.contains("example.com"));
         assertTrue(str.contains("ok"));
-        assertTrue(str.contains("freeEmail=true"));
-        assertTrue(str.contains("role=false"));
-        assertTrue(str.contains("disposable=false"));
+        assertTrue(str.contains("email_ok"));
     }
 }
